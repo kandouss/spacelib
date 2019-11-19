@@ -9,6 +9,7 @@ from collections import namedtuple
 from .buffers import ArrayCollection, ArraySpec
 from .flatter import Flatter
 
+import pdb
 
 def random_string(k):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=k))
@@ -118,16 +119,19 @@ def collate_seq(batch, device=None):
     )
 
 class RecurrentReplayBuffer:
-    def __init__(self, observation_space, action_space, hidden_dim=None, data_root='data_tmp'):
+    def __init__(self, observation_space, action_space, max_num_episodes=None, hidden_dim=None, data_root='data_tmp'):
 
         self.observation_space = observation_space
         self.action_space = action_space
 
+        self.episode_rewards = []
         self.episodes = []
-        self.hidden = []
+        self.hiddens = []
         
         self.hidden_dim = hidden_dim
         self.live_episode = None
+
+        self.max_num_episodes = max_num_episodes
 
         self.data_root=data_root
 
@@ -141,14 +145,23 @@ class RecurrentReplayBuffer:
         self.live_episode.allocate(max_length)
 
     def end_episode(self):
+        self.episode_rewards.append(self.live_episode[:][-2].sum())
         self.live_episode.toDisk(root=os.path.join(self.data_root, random_string(10)))
         self.episodes.append(self.live_episode)
 
         if self.hidden_dim is not None:
             new_hidden = RecurrentHidden(self.hidden_dim)
             new_hidden.allocate(len(self.live_episode))
-            self.hidden.append(new_hidden)
+            self.hiddens.append(new_hidden)
             del new_hidden
+
+        if (self.max_num_episodes is not None) and (len(self) > self.max_num_episodes):
+            worst_episode = np.argmin(self.episode_rewards)
+            # worst_episode = 0
+            del self.episodes[worst_episode]
+            del self.episode_rewards[worst_episode]
+            if self.hidden_dim is not None:
+                del self.hiddens[worst_episode]
 
         self.live_episode = None
 
@@ -172,12 +185,13 @@ class RecurrentReplayBuffer:
             obs, act, rew, done = self.episodes[ep_no][sample_slice]
 
             if bool(hidden) and self.hidden_dim is not None:
-                hidden_samples = self.hidden[ep_no][sample_slice]
+                hidden_samples = self.hiddens[ep_no][sample_slice]
             else:
                 hidden_samples = None
 
             if gamma is not None:
-                rew_to_end = self.episodes[samp_ix][start_ix:, -2]
+                rew_to_end = self.episodes[ep_no][start_ix:][-2]
+                # import pdb; pdb.set_trace()
                 val = multidiscount(rew_to_end, np.float32(gamma), length)
             else:
                 val = None

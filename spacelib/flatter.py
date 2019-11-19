@@ -1,20 +1,18 @@
 import numpy as np
 import gym
+import pdb
 
-class Flatter:
+class Flatter(gym.spaces.Tuple):
     def __init__(self, space):
-        self.space = space
-        self.space_is_singleton = isinstance(space, (gym.spaces.Box, gym.spaces.Discrete))
+        self._singleton = not isinstance(space, (gym.spaces.Tuple, gym.spaces.Dict))
         self.addressed_spaces = flat_address_space(space)
         self.recipe = make_empty_object(space)
-
-    def __len__(self):
-        return len(self.addressed_spaces)
+        super().__init__([subspace for subspace in self])
 
     def __iter__(self):
         for path, space in self.addressed_spaces:
             yield space
-
+            
     def flatten(self, item):
         res = []
         for (path, space) in self.addressed_spaces:
@@ -35,14 +33,10 @@ class Flatter:
                 res.append(item_)
             else:
                 raise ValueError
-
-        if self.space_is_singleton:
-            return res
-        else:
-            return res
+        return res
     
     def unflatten(self, item):
-        if self.space_is_singleton:
+        if self._singleton:
             return item[0]
         res = cook(self.recipe)
         for el, (key_path, space) in zip(item, self.addressed_spaces):

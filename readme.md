@@ -18,5 +18,5 @@ For a usage example, see the [example notebook](https://github.com/kandouss/spac
 - [ ] test/add an example for hidden state storage
 
 
-This project is licensed under the terms of the MIT license, but also please let me know if you find it useful!
-:space:
+This project is licensed under the terms of the MIT license
+Please let me know if you find it useful!
