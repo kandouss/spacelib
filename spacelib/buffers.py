@@ -61,8 +61,8 @@ class ArrayContainer:
         return len(self.spec_slices) - 1
         
     def setData(self, array_ix, data):
-        assert (data.shape[1:] == self.specs[array_ix].shape)
-        assert (data.dtype == self.dtype)
+        if not (data.shape[1:] == self.specs[array_ix].shape):
+            raise ValueError(f"Can't fit data of shape {data.shape} into buffer for shape {self.specs[array_ix].shape}.")
         if self.buffer is None:
             self.allocate(data.shape[0])
         else:
@@ -73,14 +73,17 @@ class ArrayContainer:
         self.length = length
         self.buffer = np.zeros((self.length, self.n), dtype=self.dtype)
         
-    def toDisk(self, file_path, length=None, overwrite = False):
+    def toDisk(self, file_path, length=None, overwrite=False):
         if self.buffer is None:
             raise ValueError("Can't mmap (write) a container that has no data.")
         if isinstance(self.buffer, np.memmap):
             warnings.warn("Buffer is already memory mapped.")
         if os.path.exists(file_path) and not overwrite:
             raise ValueError("Error writing ArrayContainer to disk: file {file_path} already exists.")
-        buf = self.buffer[slice(length)]
+        if length is not None:
+            buf = self.buffer
+        else:
+            buf = self.buffer[:length]
         new_buffer = np.memmap(file_path, dtype=self.dtype, shape=buf.shape, mode='w+')
         new_buffer[:] = buf[:]
         new_buffer.flush()
@@ -121,7 +124,6 @@ class ArrayContainer:
                 return self.specs[ix[1]].coerce(data[self.spec_slices[ix[1]]])
             raise IndexError(f"Confused by index {ix}; specifically the '{ix[1]}' bit.")
 
-
 class ArrayCollection:
     VERSION = '0.0'
     def __init__(self, specs):
@@ -135,7 +137,7 @@ class ArrayCollection:
         self.empty = True
     
     def __len__(self):
-        return self.insertion_index or self.length
+        return self.insertion_index or self.length or self.containers[0].length
     
     def addSpec(self, spec):
         for k, container in enumerate(self.containers):
@@ -163,6 +165,8 @@ class ArrayCollection:
 
     def setData(self, array_ix, data):
         assert isinstance(array_ix, int)
+        if self.length is None:
+            self.allocate(len(data))
         c, k = self.map[array_ix]
         self.containers[c].setData(k, data)
         self.empty = False

@@ -70,8 +70,16 @@ class Episode(ArrayCollection):
                          ArraySpec((), np.float32)])
 
     def append(self, step_data):
+        ''' Add observation, action, reward, done for a single step. '''
         obs, act, rew, done = step_data
         super().append([*self.obsf.flatten(obs), *self.actf.flatten(act), rew, done])
+    
+    def set_episode_data(self, episode_data):
+        ''' Set the whole episodes's worth of (observation, action, reward, done). '''
+        ''' Add observation, action, reward, done for a single step. '''
+        obs, act, rew, done = episode_data
+        for k, array_data in enumerate([*self.obsf.flatten(obs), *self.actf.flatten(act), rew, done]):
+            self.setData(array_ix=k, data=array_data)
 
     def __getitem__(self, ix):
         res = super().__getitem__(ix)
@@ -84,6 +92,8 @@ class Episode(ArrayCollection):
     def get_tensor(self, ix, batch_size=None, device=None):
         res = [torch.from_numpy(a).float().to(device) for a in super()[ix]]
         return res[self.obs_slice], res[self.act_slice], res[self.rew_slice], res[self.done_slice]
+
+
 
 class RecurrentHidden(ArrayCollection):
     def __init__(self, hidden_dims):
@@ -108,7 +118,6 @@ def collate_seq(batch, device=None):
             val.append(seq.val)
         if seq.hidden is not None:
             hidden.append(seq.hidden)
-
     return Sequence(
         obs = [torch.from_numpy(np.stack(o)).float().to(device) for o in zip(*obs)],
         act = [torch.from_numpy(np.stack(a)).float().to(device) for a in zip(*act)],
@@ -138,20 +147,13 @@ class RecurrentReplayBuffer:
     def __len__(self):
         return len(self.episodes)
 
-    def begin_episode(self, max_length=int(1e4)):
-        if self.live_episode is not None:
-            raise ValueError("End live episode before beginning a new one.")
-        self.live_episode = Episode(self.observation_space, self.action_space)
-        self.live_episode.allocate(max_length)
-
-    def end_episode(self):
-        self.episode_rewards.append(self.live_episode[:][-2].sum())
-        self.live_episode.toDisk(root=os.path.join(self.data_root, random_string(10)))
-        self.episodes.append(self.live_episode)
-
+    def add_episode(self, episode):
+        self.episodes.append(episode)
+        self.episode_rewards.append(episode[:][-2].sum())
+        
         if self.hidden_dim is not None:
             new_hidden = RecurrentHidden(self.hidden_dim)
-            new_hidden.allocate(len(self.live_episode))
+            new_hidden.allocate(len(episode))
             self.hiddens.append(new_hidden)
             del new_hidden
 
@@ -163,6 +165,16 @@ class RecurrentReplayBuffer:
             if self.hidden_dim is not None:
                 del self.hiddens[worst_episode]
 
+    def begin_episode(self, max_length=int(1e4)):
+        if self.live_episode is not None:
+            raise ValueError("End live episode before beginning a new one.")
+        self.live_episode = Episode(self.observation_space, self.action_space)
+        self.live_episode.allocate(max_length)
+
+    def end_episode(self):
+        save_dir = os.path.join(self.data_root, random_string(10))
+        self.live_episode.toDisk(root=save_dir)
+        self.add_episode(self.live_episode)
         self.live_episode = None
 
     def append(self, step_data):
@@ -203,7 +215,7 @@ class RecurrentReplayBuffer:
 
     def iter_sample(self, length, batch_size, minibatch_size=1, gamma=None, hidden=True, device=None):
         count = 0
-        while count < length:
+        while count < batch_size:
             n = min(minibatch_size, batch_size-count)
             yield self.sample_sequence(length, batch_size=n, gamma=gamma, hidden=hidden, device=device)
             count += minibatch_size
