@@ -24,6 +24,8 @@ def specs_from_space(fspace):
                 specs.append(ArraySpec(space.shape, np.float32))
         elif isinstance(space, gym.spaces.Discrete):
             specs.append(ArraySpec(space.n, np.float32))
+        elif isinstance(space, gym.spaces.MultiDiscrete):
+            specs.append(ArraySpec(int(space.nvec.sum()), np.float32))
         else:
             raise ValueError
     return specs
@@ -59,10 +61,11 @@ class Episode(ArrayCollection):
         self.actf = Flatter(action_space)
         n_obs = len(self.obsf)
         n_act = len(self.actf)
-        self.obs_slice = slice(0, n_obs)
-        self.act_slice = slice(n_obs, n_obs+n_act)
+        self.obs_slice = 0 if self.obsf._singleton else slice(0, n_obs)
+        self.act_slice = n_obs if self.actf._singleton else slice(n_obs, n_obs+n_act)
         self.rew_slice = n_obs+n_act
         self.done_slice = n_obs+n_act+1
+        # import pdb; pdb.set_trace()
         
         super().__init__([*specs_from_space(self.obsf),
                          *specs_from_space(self.actf),
@@ -72,6 +75,7 @@ class Episode(ArrayCollection):
     def append(self, step_data):
         ''' Add observation, action, reward, done for a single step. '''
         obs, act, rew, done = step_data
+        # import pdb; pdb.set_trace()
         super().append([*self.obsf.flatten(obs), *self.actf.flatten(act), rew, done])
     
     def set_episode_data(self, episode_data):
@@ -118,9 +122,14 @@ def collate_seq(batch, device=None):
             val.append(seq.val)
         if seq.hidden is not None:
             hidden.append(seq.hidden)
+
     return Sequence(
-        obs = [torch.from_numpy(np.stack(o)).float().to(device) for o in zip(*obs)],
-        act = [torch.from_numpy(np.stack(a)).float().to(device) for a in zip(*act)],
+        obs = ([torch.from_numpy(np.stack(o)).float().to(device) for o in zip(*obs)]
+                if not isinstance(obs[0], np.ndarray)
+                    else torch.from_numpy(np.stack(obs)).float().to(device)),
+        act = ([torch.from_numpy(np.stack(a)).float().to(device) for a in zip(*act)]
+                if not isinstance(act[0], np.ndarray)
+                    else torch.from_numpy(np.stack(act)).float().to(device)),
         rew = torch.from_numpy(np.stack(rew)).float().to(device),
         done = torch.from_numpy(np.stack(done)).float().to(device),
         val = torch.from_numpy(np.stack(val)).float().to(device) if len(val) > 0 else None,

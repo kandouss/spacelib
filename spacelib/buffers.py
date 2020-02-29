@@ -104,6 +104,14 @@ class ArrayContainer:
             self.buffer = np.copy(self.buffer)
         return self
 
+    def __setitem__(self, ix, values):
+        if self.buffer is None:
+            raise ValueError("No data in buffer.")
+        if isinstance(ix, (int, slice)):
+            ix = (ix, slice(None, None, None))
+
+        self.buffer[ix[0],self.spec_slices[ix[1]]] = values
+        
     def __getitem__(self, ix):
         if self.buffer is None:
             raise ValueError("No data in buffer.")
@@ -125,19 +133,38 @@ class ArrayContainer:
             raise IndexError(f"Confused by index {ix}; specifically the '{ix[1]}' bit.")
 
 class ArrayCollection:
-    VERSION = '0.0'
+    VERSION = '0.1'
     def __init__(self, specs):
         self.containers = []
         self.map = []
-        self.specs = specs
         for spec in specs:
-            self.addSpec(spec)
+            self.addSpec(self.space_to_spec(spec))
         self.insertion_index = None
-        self.length = None
+        self.allocated_length = None
         self.empty = True
     
+    def space_to_spec(self, space):
+        if isinstance(space, gym.Space):
+            if isinstance(space, gym.spaces.Box):
+                return ArraySpec(space.shape, dtype=space.dtype)
+            elif isinstance(space, gym.spaces.Discrete):
+                return ArraySpec((), dtype=np.dtype('int'))
+            else:
+                raise ValueError
+        elif isinstance(space, tuple):
+            try:
+                return ArraySpec(*space[:-1], np.dtype(space[-1]))
+            except:
+                return ArraySpec(space, dtype=np.float32)
+        elif isinstance(space, int):
+            return ArraySpec(space, dtype=np.float32)
+        elif isinstance(space, ArraySpec):
+            return space
+        else:
+            raise ValueError
+
     def __len__(self):
-        return self.insertion_index or self.length or self.containers[0].length
+        return self.insertion_index or self.allocated_length or self.containers[0].length
     
     def addSpec(self, spec):
         for k, container in enumerate(self.containers):
@@ -150,7 +177,8 @@ class ArrayCollection:
         self.map.append((k, container.addSpec(spec)))
     
     def toDisk(self, root, overwrite=False):
-        os.makedirs(root)
+        if not os.path.isdir(root):
+            os.makedirs(root)
         for k, c in enumerate(self.containers):
             c.toDisk(os.path.join(root, f'{k}.{self.VERSION}.dat'), length=self.insertion_index, overwrite=overwrite)
     
@@ -165,7 +193,7 @@ class ArrayCollection:
 
     def setData(self, array_ix, data):
         assert isinstance(array_ix, int)
-        if self.length is None:
+        if self.allocated_length is None:
             self.allocate(len(data))
         c, k = self.map[array_ix]
         self.containers[c].setData(k, data)
@@ -175,22 +203,40 @@ class ArrayCollection:
         self.insertion_index = 0
         for c in self.containers:
             c.allocate(length)
-        self.length = length
+        self.allocated_length = length
         self.empty = False
         
-    def append(self, values):
+    def append(self, *values):
         if self.insertion_index is None:
             raise ValueError("Can't insert values into an ArrayCollection without allocating first.")
-        if len(values) != len(self.map):
-            raise ValueError("Can only insert values N at a time (where N is the number of arrays in the collection).")
-        if self.insertion_index >= self.length:
+        # if len(values) != len(self.map):
+        #     raise ValueError("Can only insert values N at a time (where N is the number of arrays in the collection).")
+        if self.insertion_index >= self.allocated_length:
             warnings.warn("Collection is full. Skipping insertion.")
         else:
             for val, (container, ix_in_container) in zip(values, self.map):
                 self.containers[container][self.insertion_index, ix_in_container][()] = val
             self.insertion_index += 1
 
+    def __setitem__(self, ix, val):
+        if isinstance(ix, (int, slice, list)):
+            ix = (ix, slice(None,None,None))
+        
+        if isinstance(ix[1], (slice, list)): # using multiple containers
+            m = self.map[ix[1]] # (list of (container_no, ix_in_container))
+            data_ = {i:self.containers[i][ix[0]] for i in set(x[0] for x in m)}
+            assert len(m) == len(val)
+            for (c,k), v in zip(m, val):
+                data_[c][k] = v
+        elif isinstance(ix[1], int):
+            c, k = self.map[ix[1]]
+            self.containers[c][ix[0], k] = val
+        else:
+            raise IndexError("??")
+
     def __getitem__(self, ix):
+        if isinstance(ix, slice) and ix.stop is None:
+            ix = slice(ix.start, self.insertion_index, ix.step)
         if isinstance(ix, (int, slice, list)):
             ix = (ix, slice(None,None,None))
         
