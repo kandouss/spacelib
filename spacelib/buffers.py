@@ -139,7 +139,7 @@ class ArrayCollection:
         self.map = []
         for spec in specs:
             self.addSpec(self.space_to_spec(spec))
-        self.insertion_index = None
+        self.insertion_index = 0
         self.allocated_length = None
         self.empty = True
     
@@ -164,7 +164,7 @@ class ArrayCollection:
             raise ValueError
 
     def __len__(self):
-        return self.insertion_index or self.allocated_length or self.containers[0].length
+        return self.insertion_index
     
     def addSpec(self, spec):
         for k, container in enumerate(self.containers):
@@ -207,10 +207,8 @@ class ArrayCollection:
         self.empty = False
         
     def append(self, *values):
-        if self.insertion_index is None:
+        if self.allocated_length is None:
             raise ValueError("Can't insert values into an ArrayCollection without allocating first.")
-        # if len(values) != len(self.map):
-        #     raise ValueError("Can only insert values N at a time (where N is the number of arrays in the collection).")
         if self.insertion_index >= self.allocated_length:
             warnings.warn("Collection is full. Skipping insertion.")
         else:
@@ -249,7 +247,3 @@ class ArrayCollection:
             return self.containers[c][ix[0], k]
         else:
             raise IndexError("??")
-
-            
-
-    

@@ -157,7 +157,7 @@ class RecurrentReplayBuffer:
         return len(self.episodes)
 
     def add_episode(self, episode):
-        self.episodes.append(episode)
+        self.episodes.append(*episode)
         self.episode_rewards.append(episode[:][-2].sum())
         
         if self.hidden_dim is not None:
